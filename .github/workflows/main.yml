@@ -8,19 +8,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. تحميل المستودع
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2. فك مشروع Lumi
       - name: Extract Lumi project
         run: |
+          rm -rf lumi_project
+          mkdir -p lumi_project
           unzip -q lumi.zip -d lumi_project
 
+      # 3. العثور على مشروع Flutter
       - name: Find Flutter project
+        shell: bash
         run: |
           PUBSPEC=$(find lumi_project -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "pubspec.yaml not found"
+            echo "ERROR: pubspec.yaml was not found."
             exit 1
           fi
 
@@ -28,43 +34,153 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Flutter project found at:"
+          echo "Flutter project:"
           echo "$PROJECT_DIR"
 
+      # 4. تثبيت Flutter stable
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.44.7"
           channel: stable
+          cache: true
 
-      - name: Upgrade Gradle
+      # 5. عرض إصدارات البيئة
+      - name: Flutter environment
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      # 6. ضبط Gradle
+      - name: Configure Gradle
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
           cd android
 
-          echo "=== Gradle configuration before update ==="
-          cat gradle/wrapper/gradle-wrapper.properties
+          GRADLE_FILE="gradle/wrapper/gradle-wrapper.properties"
 
-          sed -i 's#distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.14-bin.zip#' gradle/wrapper/gradle-wrapper.properties
+          if [ ! -f "$GRADLE_FILE" ]; then
+            echo "ERROR: Gradle wrapper file not found."
+            exit 1
+          fi
 
-          echo "=== Gradle configuration after update ==="
-          cat gradle/wrapper/gradle-wrapper.properties
+          sed -i \
+            's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.14-bin.zip#' \
+            "$GRADLE_FILE"
 
+          echo "=== Gradle wrapper ==="
+          cat "$GRADLE_FILE"
+
+      # 7. ضبط Android Gradle Plugin
+      - name: Configure Android Gradle Plugin
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          cd android
+
+          # settings.gradle
+          if [ -f "settings.gradle" ]; then
+            sed -i -E \
+              's/(id[[:space:]]*\(?[[:space:]]*["'\'']com\.android\.application["'\''][[:space:]]*\)?[[:space:]]*version[[:space:]]*["'\''])[0-9.]+(["'\''])/\18.11.1\2/g' \
+              settings.gradle
+          fi
+
+          # settings.gradle.kts
+          if [ -f "settings.gradle.kts" ]; then
+            sed -i -E \
+              's/(id\(["'\'']com\.android\.application["'\'']\)[[:space:]]*version[[:space:]]*["'\''])[0-9.]+(["'\''])/\18.11.1\2/g' \
+              settings.gradle.kts
+          fi
+
+          # build.gradle القديم
+          if [ -f "build.gradle" ]; then
+            sed -i -E \
+              's/(com\.android\.tools\.build:gradle:)[0-9.]+/\18.11.1/g' \
+              build.gradle
+          fi
+
+          # build.gradle.kts القديم
+          if [ -f "build.gradle.kts" ]; then
+            sed -i -E \
+              's/(com\.android\.tools\.build:gradle:)[0-9.]+/\18.11.1/g' \
+              build.gradle.kts
+          fi
+
+          echo "=== Android plugin configuration ==="
+
+          if [ -f "settings.gradle" ]; then
+            grep -n "com.android.application" settings.gradle || true
+          fi
+
+          if [ -f "settings.gradle.kts" ]; then
+            grep -n "com.android.application" settings.gradle.kts || true
+          fi
+
+          if [ -f "build.gradle" ]; then
+            grep -n "com.android.tools.build:gradle" build.gradle || true
+          fi
+
+          if [ -f "build.gradle.kts" ]; then
+            grep -n "com.android.tools.build:gradle" build.gradle.kts || true
+          fi
+
+      # 8. إعدادات توافق Flutter / AGP
+      - name: Configure Android compatibility
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          cd android
+
+          touch gradle.properties
+
+          if grep -q "^android.newDsl=" gradle.properties; then
+            sed -i 's/^android.newDsl=.*/android.newDsl=false/' gradle.properties
+          else
+            echo "android.newDsl=false" >> gradle.properties
+          fi
+
+          if grep -q "^android.builtInKotlin=" gradle.properties; then
+            sed -i 's/^android.builtInKotlin=.*/android.builtInKotlin=false/' gradle.properties
+          else
+            echo "android.builtInKotlin=false" >> gradle.properties
+          fi
+
+          echo "=== gradle.properties ==="
+          cat gradle.properties
+
+      # 9. التحقق من Gradle
       - name: Verify Gradle
         working-directory: ${{ env.PROJECT_DIR }}/android
+        shell: bash
         run: |
           chmod +x gradlew
           ./gradlew --version
 
+      # 10. تنزيل dependencies
       - name: Flutter Pub Get
         working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter pub get
+        run: |
+          flutter pub get
 
-      - name: Build APK
+      # 11. تحليل المشروع قبل البناء
+      - name: Flutter Analyze
         working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter build apk --release
+        run: |
+          flutter analyze
+        continue-on-error: true
 
-      - name: Upload APK
+      # 12. بناء APK
+      - name: Build Lumi APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter build apk --release
+
+      # 13. رفع APK
+      - name: Upload Lumi APK
         uses: actions/upload-artifact@v4
         with:
           name: Lumi-APK
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
