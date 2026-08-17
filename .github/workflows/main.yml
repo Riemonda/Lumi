@@ -28,6 +28,9 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+          echo "Flutter project found at:"
+          echo "$PROJECT_DIR"
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -37,7 +40,20 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           cd android
-          sed -i 's/gradle-8\.10\.2-bin/gradle-8.14-bin/' gradle/wrapper/gradle-wrapper.properties
+
+          echo "=== Gradle configuration before update ==="
+          cat gradle/wrapper/gradle-wrapper.properties
+
+          sed -i 's#distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.14-bin.zip#' gradle/wrapper/gradle-wrapper.properties
+
+          echo "=== Gradle configuration after update ==="
+          cat gradle/wrapper/gradle-wrapper.properties
+
+      - name: Verify Gradle
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --version
 
       - name: Flutter Pub Get
         working-directory: ${{ env.PROJECT_DIR }}
