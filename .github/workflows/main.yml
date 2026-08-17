@@ -26,12 +26,18 @@ jobs:
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+
+      - name: Upgrade Gradle
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          cd android
+          sed -i 's/gradle-8\.10\.2-bin/gradle-8.14-bin/' gradle/wrapper/gradle-wrapper.properties
 
       - name: Flutter Pub Get
         working-directory: ${{ env.PROJECT_DIR }}
